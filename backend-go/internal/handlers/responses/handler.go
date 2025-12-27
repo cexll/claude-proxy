@@ -150,8 +150,8 @@ func tryChannelWithAllKeys(
 	metricsManager := channelScheduler.GetResponsesMetricsManager()
 	baseURLs := upstream.GetAllBaseURLs()
 
-	// 获取预热排序后的 URL 列表（首次访问时触发预热）
-	sortedURLResults := channelScheduler.GetSortedURLsForChannel(c.Request.Context(), channelIndex, baseURLs, upstream.InsecureSkipVerify)
+	// 获取动态排序后的 URL 列表（非阻塞，立即返回）
+	sortedURLResults := channelScheduler.GetSortedURLsForChannel(channelIndex, baseURLs)
 
 	var lastFailoverError *common.FailoverError
 	deprioritizeCandidates := make(map[string]bool)
@@ -189,12 +189,11 @@ func tryChannelWithAllKeys(
 				log.Printf("[Responses-Key] 使用API密钥: %s (BaseURL %d/%d, 尝试 %d/%d)", utils.MaskAPIKey(apiKey), sortedIdx+1, len(sortedURLResults), attempt+1, maxRetries)
 			}
 
-			// 临时设置 BaseURL 用于本次请求
-			originalBaseURL := upstream.BaseURL
-			upstream.BaseURL = currentBaseURL
+			// 使用深拷贝避免并发修改问题
+			upstreamCopy := upstream.Clone()
+			upstreamCopy.BaseURL = currentBaseURL
 
-			providerReq, _, err := provider.ConvertToProviderRequest(c, upstream, apiKey)
-			upstream.BaseURL = originalBaseURL // 恢复
+			providerReq, _, err := provider.ConvertToProviderRequest(c, upstreamCopy, apiKey)
 
 			if err != nil {
 				failedKeys[apiKey] = true
@@ -207,6 +206,8 @@ func tryChannelWithAllKeys(
 				failedKeys[apiKey] = true
 				cfgManager.MarkKeyAsFailed(apiKey)
 				channelScheduler.RecordFailure(currentBaseURL, apiKey, true)
+				// 网络错误（超时等）触发 URL 动态降级
+				channelScheduler.MarkURLFailure(channelIndex, currentBaseURL)
 				log.Printf("[Responses-Key] 警告: API密钥失败: %v", err)
 				continue
 			}
@@ -221,6 +222,8 @@ func tryChannelWithAllKeys(
 					failedKeys[apiKey] = true
 					cfgManager.MarkKeyAsFailed(apiKey)
 					channelScheduler.RecordFailure(currentBaseURL, apiKey, true)
+					// HTTP 5xx 等错误也触发 URL 动态降级
+					channelScheduler.MarkURLFailure(channelIndex, currentBaseURL)
 					log.Printf("[Responses-Key] 警告: API密钥失败 (状态: %d)，尝试下一个密钥", resp.StatusCode)
 
 					lastFailoverError = &common.FailoverError{
@@ -245,6 +248,9 @@ func tryChannelWithAllKeys(
 					_ = cfgManager.DeprioritizeAPIKey(key)
 				}
 			}
+
+			// 标记 URL 成功，触发动态排序优化
+			channelScheduler.MarkURLSuccess(channelIndex, currentBaseURL)
 
 			usage := handleSuccess(c, resp, provider, upstream.ServiceType, envCfg, sessionManager, startTime, &responsesReq, bodyBytes)
 			return true, apiKey, originalIdx, nil, usage
@@ -327,12 +333,11 @@ func handleSingleChannel(
 				log.Printf("[Responses-Key] 使用API密钥: %s", utils.MaskAPIKey(apiKey))
 			}
 
-			// 临时设置 BaseURL 用于本次请求
-			originalBaseURL := upstream.BaseURL
-			upstream.BaseURL = currentBaseURL
+			// 使用深拷贝避免并发修改问题
+			upstreamCopy := upstream.Clone()
+			upstreamCopy.BaseURL = currentBaseURL
 
-			providerReq, _, err := provider.ConvertToProviderRequest(c, upstream, apiKey)
-			upstream.BaseURL = originalBaseURL // 恢复
+			providerReq, _, err := provider.ConvertToProviderRequest(c, upstreamCopy, apiKey)
 
 			if err != nil {
 				lastError = err
