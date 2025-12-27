@@ -8,7 +8,7 @@ import (
 )
 
 // GetGlobalStatsHistory 获取全局统计历史数据
-// GET /api/{messages|responses}/global/stats/history?duration={1h|6h|24h|today}
+// GET /api/{messages|responses}/global/stats/history?duration={1h|6h|24h|today|7d|30d}
 func GetGlobalStatsHistory(metricsManager *metrics.MetricsManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// 解析 duration 参数
@@ -25,16 +25,11 @@ func GetGlobalStatsHistory(metricsManager *metrics.MetricsManager) gin.HandlerFu
 				duration = time.Minute
 			}
 		} else {
-			duration, err = time.ParseDuration(durationStr)
+			duration, err = parseDurationParam(durationStr)
 			if err != nil {
-				c.JSON(400, gin.H{"error": "Invalid duration parameter. Use: 1h, 6h, 24h, or today"})
+				c.JSON(400, gin.H{"error": "Invalid duration parameter. Use: 1h, 6h, 24h, today, 7d, or 30d"})
 				return
 			}
-		}
-
-		// 限制最大查询范围为 24 小时
-		if duration > 24*time.Hour {
-			duration = 24 * time.Hour
 		}
 
 		// 解析或自动选择 interval
@@ -61,8 +56,12 @@ func GetGlobalStatsHistory(metricsManager *metrics.MetricsManager) gin.HandlerFu
 				interval = time.Minute
 			case duration <= 6*time.Hour:
 				interval = 5 * time.Minute
-			default:
+			case duration <= 24*time.Hour:
 				interval = 15 * time.Minute
+			case duration <= 7*24*time.Hour:
+				interval = 2 * time.Hour
+			default:
+				interval = 24 * time.Hour
 			}
 		}
 

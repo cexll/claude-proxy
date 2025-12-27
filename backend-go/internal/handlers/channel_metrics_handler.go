@@ -298,6 +298,7 @@ type MetricsHistoryResponse struct {
 	ChannelIndex int                        `json:"channelIndex"`
 	ChannelName  string                     `json:"channelName"`
 	DataPoints   []metrics.HistoryDataPoint `json:"dataPoints"`
+	Warning      string                     `json:"warning,omitempty"`
 }
 
 // GetChannelMetricsHistory 获取渠道指标历史数据（用于时间序列图表）
@@ -308,15 +309,10 @@ func GetChannelMetricsHistory(metricsManager *metrics.MetricsManager, cfgManager
 	return func(c *gin.Context) {
 		// 解析 duration 参数
 		durationStr := c.DefaultQuery("duration", "24h")
-		duration, err := time.ParseDuration(durationStr)
+		duration, err := parseDurationParam(durationStr)
 		if err != nil {
 			c.JSON(400, gin.H{"error": "Invalid duration parameter"})
 			return
-		}
-
-		// 限制最大查询范围为 24 小时
-		if duration > 24*time.Hour {
-			duration = 24 * time.Hour
 		}
 
 		// 解析或自动选择 interval
@@ -343,8 +339,12 @@ func GetChannelMetricsHistory(metricsManager *metrics.MetricsManager, cfgManager
 				interval = time.Minute
 			case duration <= 6*time.Hour:
 				interval = 5 * time.Minute
-			default:
+			case duration <= 24*time.Hour:
 				interval = 15 * time.Minute
+			case duration <= 7*24*time.Hour:
+				interval = 2 * time.Hour
+			default:
+				interval = 24 * time.Hour
 			}
 		}
 
@@ -358,12 +358,13 @@ func GetChannelMetricsHistory(metricsManager *metrics.MetricsManager, cfgManager
 
 		result := make([]MetricsHistoryResponse, 0, len(upstreams))
 		for i, upstream := range upstreams {
-			dataPoints := metricsManager.GetHistoricalStats(upstream.BaseURL, upstream.APIKeys, duration, interval)
+			dataPoints, warning := metricsManager.GetHistoricalStatsWithWarning(upstream.BaseURL, upstream.APIKeys, duration, interval)
 
 			result = append(result, MetricsHistoryResponse{
 				ChannelIndex: i,
 				ChannelName:  upstream.Name,
 				DataPoints:   dataPoints,
+				Warning:      warning,
 			})
 		}
 
@@ -376,6 +377,7 @@ type ChannelKeyMetricsHistoryResponse struct {
 	ChannelIndex int                       `json:"channelIndex"`
 	ChannelName  string                    `json:"channelName"`
 	Keys         []KeyMetricsHistoryResult `json:"keys"`
+	Warning      string                    `json:"warning,omitempty"`
 }
 
 // KeyMetricsHistoryResult 单个 Key 的历史数据
@@ -412,16 +414,11 @@ func GetChannelKeyMetricsHistory(metricsManager *metrics.MetricsManager, cfgMana
 				duration = time.Minute
 			}
 		} else {
-			duration, err = time.ParseDuration(durationStr)
+			duration, err = parseDurationParam(durationStr)
 			if err != nil {
-				c.JSON(400, gin.H{"error": "Invalid duration parameter. Use: 1h, 6h, 24h, or today"})
+				c.JSON(400, gin.H{"error": "Invalid duration parameter. Use: 1h, 6h, 24h, today, 7d, or 30d"})
 				return
 			}
-		}
-
-		// 限制最大查询范围为 24 小时
-		if duration > 24*time.Hour {
-			duration = 24 * time.Hour
 		}
 
 		// 解析或自动选择 interval
@@ -448,8 +445,12 @@ func GetChannelKeyMetricsHistory(metricsManager *metrics.MetricsManager, cfgMana
 				interval = time.Minute
 			case duration <= 6*time.Hour:
 				interval = 5 * time.Minute
-			default:
+			case duration <= 24*time.Hour:
 				interval = 15 * time.Minute
+			case duration <= 7*24*time.Hour:
+				interval = 2 * time.Hour
+			default:
+				interval = 24 * time.Hour
 			}
 		}
 
@@ -489,9 +490,13 @@ func GetChannelKeyMetricsHistory(metricsManager *metrics.MetricsManager, cfgMana
 			Keys:         make([]KeyMetricsHistoryResult, 0, len(displayKeys)),
 		}
 
+		var warning string
 		// 为筛选后的 Key 获取历史数据
 		for i, keyInfo := range displayKeys {
-			dataPoints := metricsManager.GetKeyHistoricalStats(upstream.BaseURL, keyInfo.APIKey, duration, interval)
+			dataPoints, w := metricsManager.GetKeyHistoricalStatsWithWarning(upstream.BaseURL, keyInfo.APIKey, duration, interval)
+			if warning == "" {
+				warning = w
+			}
 
 			// 获取 Key 的颜色
 			color := keyColors[i%len(keyColors)]
@@ -506,6 +511,7 @@ func GetChannelKeyMetricsHistory(metricsManager *metrics.MetricsManager, cfgMana
 			})
 		}
 
+		result.Warning = warning
 		c.JSON(200, result)
 	}
 }

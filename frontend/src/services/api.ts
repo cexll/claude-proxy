@@ -128,6 +128,7 @@ export interface MetricsHistoryResponse {
   channelIndex: number
   channelName: string
   dataPoints: HistoryDataPoint[]
+  warning?: string
 }
 
 // Key 级别历史数据点（包含 Token 数据）
@@ -155,6 +156,7 @@ export interface ChannelKeyMetricsHistoryResponse {
   channelIndex: number
   channelName: string
   keys: KeyHistoryData[]
+  warning?: string
 }
 
 // ============== 全局统计类型 ==============
@@ -189,6 +191,7 @@ export interface GlobalStatsSummary {
 export interface GlobalStatsHistoryResponse {
   dataPoints: GlobalHistoryDataPoint[]
   summary: GlobalStatsSummary
+  warning?: string
 }
 
 class ApiService {
@@ -513,36 +516,36 @@ class ApiService {
   // ============== 历史指标 API ==============
 
   // 获取 Messages 渠道历史指标（用于时间序列图表）
-  async getChannelMetricsHistory(duration: '1h' | '6h' | '24h' = '24h'): Promise<MetricsHistoryResponse[]> {
+  async getChannelMetricsHistory(duration: '1h' | '6h' | '24h' | '7d' | '30d' = '24h'): Promise<MetricsHistoryResponse[]> {
     return this.request(`/messages/channels/metrics/history?duration=${duration}`)
   }
 
   // 获取 Responses 渠道历史指标
-  async getResponsesChannelMetricsHistory(duration: '1h' | '6h' | '24h' = '24h'): Promise<MetricsHistoryResponse[]> {
+  async getResponsesChannelMetricsHistory(duration: '1h' | '6h' | '24h' | '7d' | '30d' = '24h'): Promise<MetricsHistoryResponse[]> {
     return this.request(`/responses/channels/metrics/history?duration=${duration}`)
   }
 
   // ============== Key 级别历史指标 API ==============
 
   // 获取 Messages 渠道 Key 级别历史指标（用于 Key 趋势图表）
-  async getChannelKeyMetricsHistory(channelId: number, duration: '1h' | '6h' | '24h' | 'today' = '6h'): Promise<ChannelKeyMetricsHistoryResponse> {
+  async getChannelKeyMetricsHistory(channelId: number, duration: '1h' | '6h' | '24h' | 'today' | '7d' | '30d' = '6h'): Promise<ChannelKeyMetricsHistoryResponse> {
     return this.request(`/messages/channels/${channelId}/keys/metrics/history?duration=${duration}`)
   }
 
   // 获取 Responses 渠道 Key 级别历史指标
-  async getResponsesChannelKeyMetricsHistory(channelId: number, duration: '1h' | '6h' | '24h' | 'today' = '6h'): Promise<ChannelKeyMetricsHistoryResponse> {
+  async getResponsesChannelKeyMetricsHistory(channelId: number, duration: '1h' | '6h' | '24h' | 'today' | '7d' | '30d' = '6h'): Promise<ChannelKeyMetricsHistoryResponse> {
     return this.request(`/responses/channels/${channelId}/keys/metrics/history?duration=${duration}`)
   }
 
   // ============== 全局统计 API ==============
 
   // 获取 Messages 全局统计历史
-  async getMessagesGlobalStats(duration: '1h' | '6h' | '24h' | 'today' = '24h'): Promise<GlobalStatsHistoryResponse> {
+  async getMessagesGlobalStats(duration: '1h' | '6h' | '24h' | 'today' | '7d' | '30d' = '24h'): Promise<GlobalStatsHistoryResponse> {
     return this.request(`/messages/global/stats/history?duration=${duration}`)
   }
 
   // 获取 Responses 全局统计历史
-  async getResponsesGlobalStats(duration: '1h' | '6h' | '24h' | 'today' = '24h'): Promise<GlobalStatsHistoryResponse> {
+  async getResponsesGlobalStats(duration: '1h' | '6h' | '24h' | 'today' | '7d' | '30d' = '24h'): Promise<GlobalStatsHistoryResponse> {
     return this.request(`/responses/global/stats/history?duration=${duration}`)
   }
 }

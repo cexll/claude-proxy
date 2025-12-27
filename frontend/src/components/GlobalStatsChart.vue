@@ -16,6 +16,8 @@
           <v-btn value="1h" size="x-small">1小时</v-btn>
           <v-btn value="6h" size="x-small">6小时</v-btn>
           <v-btn value="24h" size="x-small">24小时</v-btn>
+          <v-btn value="7d" size="x-small">7天</v-btn>
+          <v-btn value="30d" size="x-small">30天</v-btn>
           <v-btn value="today" size="x-small">今日</v-btn>
         </v-btn-toggle>
 
@@ -122,7 +124,7 @@ const props = withDefaults(defineProps<{
 
 // Types
 type ViewMode = 'traffic' | 'tokens' | 'cache'
-type Duration = '1h' | '6h' | '24h' | 'today'
+type Duration = '1h' | '6h' | '24h' | '7d' | '30d' | 'today'
 
 // LocalStorage keys for preferences (per apiType)
 const getStorageKey = (apiType: string, key: string) => `globalStats:${apiType}:${key}`
@@ -133,7 +135,7 @@ const loadSavedPreferences = (apiType: string) => {
   const savedDuration = localStorage.getItem(getStorageKey(apiType, 'duration')) as Duration | null
   return {
     view: savedView && ['traffic', 'tokens', 'cache'].includes(savedView) ? savedView : 'traffic',
-    duration: savedDuration && ['1h', '6h', '24h', 'today'].includes(savedDuration) ? savedDuration : '6h'
+    duration: savedDuration && ['1h', '6h', '24h', '7d', '30d', 'today'].includes(savedDuration) ? savedDuration : '6h'
   }
 }
 
@@ -267,7 +269,7 @@ const chartOptions = computed(() => {
       type: 'datetime',
       labels: {
         datetimeUTC: false,
-        format: 'HH:mm',
+        format: selectedDuration.value === '7d' || selectedDuration.value === '30d' ? 'MM-dd' : 'HH:mm',
         style: { fontSize: '10px' }
       },
       axisBorder: { show: false },
@@ -424,6 +426,11 @@ const refreshData = async (isAutoRefresh = false) => {
 watch(selectedDuration, (newVal) => {
   savePreference(props.apiType, 'duration', newVal)
   refreshData()
+  if (newVal === '7d' || newVal === '30d') {
+    stopAutoRefresh()
+  } else {
+    startAutoRefresh()
+  }
 })
 
 watch(selectedView, (newVal) => {
@@ -441,7 +448,9 @@ watch(() => props.apiType, (newApiType) => {
 // Initial load and start auto refresh
 onMounted(() => {
   refreshData()
-  startAutoRefresh()
+  if (selectedDuration.value !== '7d' && selectedDuration.value !== '30d') {
+    startAutoRefresh()
+  }
 })
 
 // Cleanup timer on unmount

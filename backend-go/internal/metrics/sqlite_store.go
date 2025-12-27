@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -499,6 +500,184 @@ func (s *SQLiteStore) GetWriteBufferStats() WriteBufferStats {
 		BufferUsage:        usage,
 		DroppedRecordCount: s.droppedRecords,
 	}
+}
+
+// AggregatedStats 聚合统计（用于 DB 查询返回）
+type AggregatedStats struct {
+	RequestCount        int64
+	SuccessCount        int64
+	FailureCount        int64
+	InputTokens         int64
+	OutputTokens        int64
+	CacheCreationTokens int64
+	CacheReadTokens     int64
+}
+
+func (s *SQLiteStore) QueryRequestRecordTotals(apiType string, start, end time.Time, metricsKeys []string) (AggregatedStats, error) {
+	args := []any{apiType, start.Unix(), end.Unix()}
+
+	var b strings.Builder
+	b.WriteString(`
+		SELECT
+			COUNT(*) AS total_requests,
+			COALESCE(SUM(success), 0) AS success_count,
+			COALESCE(SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END), 0) AS failure_count,
+			COALESCE(SUM(input_tokens), 0) AS input_tokens,
+			COALESCE(SUM(output_tokens), 0) AS output_tokens,
+			COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens,
+			COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens
+		FROM request_records
+		WHERE api_type = ? AND timestamp >= ? AND timestamp < ?
+	`)
+
+	if len(metricsKeys) > 0 {
+		b.WriteString(" AND metrics_key IN (")
+		b.WriteString(strings.TrimRight(strings.Repeat("?,", len(metricsKeys)), ","))
+		b.WriteString(")")
+		for _, k := range metricsKeys {
+			args = append(args, k)
+		}
+	}
+
+	var out AggregatedStats
+	err := s.db.QueryRow(b.String(), args...).Scan(
+		&out.RequestCount,
+		&out.SuccessCount,
+		&out.FailureCount,
+		&out.InputTokens,
+		&out.OutputTokens,
+		&out.CacheCreationTokens,
+		&out.CacheReadTokens,
+	)
+	if err != nil {
+		return AggregatedStats{}, err
+	}
+	return out, nil
+}
+
+func (s *SQLiteStore) QueryRequestRecordBucketStats(apiType string, start, end time.Time, interval time.Duration, metricsKeys []string) (map[int64]AggregatedStats, error) {
+	intervalSeconds := int64(interval / time.Second)
+	if intervalSeconds <= 0 {
+		return nil, fmt.Errorf("interval 过小: %s", interval)
+	}
+
+	startUnix := start.Unix()
+	endUnix := end.Unix()
+	args := []any{startUnix, intervalSeconds, apiType, startUnix, endUnix}
+
+	var b strings.Builder
+	b.WriteString(`
+		SELECT
+			CAST((timestamp - ?) / ? AS INTEGER) AS bucket,
+			COUNT(*) AS total_requests,
+			COALESCE(SUM(success), 0) AS success_count,
+			COALESCE(SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END), 0) AS failure_count,
+			COALESCE(SUM(input_tokens), 0) AS input_tokens,
+			COALESCE(SUM(output_tokens), 0) AS output_tokens,
+			COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens,
+			COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens
+		FROM request_records
+		WHERE api_type = ? AND timestamp > ? AND timestamp < ?
+	`)
+
+	if len(metricsKeys) > 0 {
+		b.WriteString(" AND metrics_key IN (")
+		b.WriteString(strings.TrimRight(strings.Repeat("?,", len(metricsKeys)), ","))
+		b.WriteString(")")
+		for _, k := range metricsKeys {
+			args = append(args, k)
+		}
+	}
+
+	b.WriteString(" GROUP BY bucket ORDER BY bucket ASC")
+
+	rows, err := s.db.Query(b.String(), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[int64]AggregatedStats)
+	for rows.Next() {
+		var bucket int64
+		var agg AggregatedStats
+		if err := rows.Scan(
+			&bucket,
+			&agg.RequestCount,
+			&agg.SuccessCount,
+			&agg.FailureCount,
+			&agg.InputTokens,
+			&agg.OutputTokens,
+			&agg.CacheCreationTokens,
+			&agg.CacheReadTokens,
+		); err != nil {
+			return nil, err
+		}
+		result[bucket] = agg
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (s *SQLiteStore) QueryDailyTotals(apiType, startDate, endDate string, metricsKeys []string) (map[string]AggregatedStats, error) {
+	args := []any{apiType, startDate, endDate}
+
+	var b strings.Builder
+	b.WriteString(`
+		SELECT
+			date,
+			COALESCE(SUM(total_requests), 0) AS total_requests,
+			COALESCE(SUM(success_count), 0) AS success_count,
+			COALESCE(SUM(failure_count), 0) AS failure_count,
+			COALESCE(SUM(input_tokens), 0) AS input_tokens,
+			COALESCE(SUM(output_tokens), 0) AS output_tokens,
+			COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens,
+			COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens
+		FROM daily_stats
+		WHERE api_type = ? AND date >= ? AND date <= ?
+	`)
+
+	if len(metricsKeys) > 0 {
+		b.WriteString(" AND metrics_key IN (")
+		b.WriteString(strings.TrimRight(strings.Repeat("?,", len(metricsKeys)), ","))
+		b.WriteString(")")
+		for _, k := range metricsKeys {
+			args = append(args, k)
+		}
+	}
+
+	b.WriteString(" GROUP BY date ORDER BY date ASC")
+
+	rows, err := s.db.Query(b.String(), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[string]AggregatedStats)
+	for rows.Next() {
+		var dateStr string
+		var agg AggregatedStats
+		if err := rows.Scan(
+			&dateStr,
+			&agg.RequestCount,
+			&agg.SuccessCount,
+			&agg.FailureCount,
+			&agg.InputTokens,
+			&agg.OutputTokens,
+			&agg.CacheCreationTokens,
+			&agg.CacheReadTokens,
+		); err != nil {
+			return nil, err
+		}
+		result[dateStr] = agg
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // GetRecordCount 获取记录总数（用于调试）
