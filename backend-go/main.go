@@ -14,6 +14,7 @@ import (
 
 	"github.com/BenedictKing/claude-proxy/internal/config"
 	"github.com/BenedictKing/claude-proxy/internal/handlers"
+	"github.com/BenedictKing/claude-proxy/internal/handlers/gemini"
 	"github.com/BenedictKing/claude-proxy/internal/handlers/messages"
 	"github.com/BenedictKing/claude-proxy/internal/handlers/responses"
 	"github.com/BenedictKing/claude-proxy/internal/logger"
@@ -199,6 +200,28 @@ func main() {
 		apiGroup.GET("/responses/channels/metrics/history", handlers.GetChannelMetricsHistory(responsesMetricsManager, cfgManager, true))
 		apiGroup.GET("/responses/channels/:id/keys/metrics/history", handlers.GetChannelKeyMetricsHistory(responsesMetricsManager, cfgManager, true))
 		apiGroup.GET("/responses/global/stats/history", handlers.GetGlobalStatsHistory(responsesMetricsManager))
+
+		// Gemini 渠道管理
+		apiGroup.GET("/gemini/channels", gemini.GetUpstreams(cfgManager))
+		apiGroup.POST("/gemini/channels", gemini.AddUpstream(cfgManager))
+		apiGroup.PUT("/gemini/channels/:id", gemini.UpdateUpstream(cfgManager, channelScheduler))
+		apiGroup.DELETE("/gemini/channels/:id", gemini.DeleteUpstream(cfgManager))
+		apiGroup.POST("/gemini/channels/:id/keys", gemini.AddApiKey(cfgManager))
+		apiGroup.DELETE("/gemini/channels/:id/keys/:apiKey", gemini.DeleteApiKey(cfgManager))
+		apiGroup.POST("/gemini/channels/:id/keys/:apiKey/top", gemini.MoveApiKeyToTop(cfgManager))
+		apiGroup.POST("/gemini/channels/:id/keys/:apiKey/bottom", gemini.MoveApiKeyToBottom(cfgManager))
+
+		// Gemini 多渠道调度 API
+		apiGroup.POST("/gemini/channels/reorder", gemini.ReorderChannels(cfgManager))
+		apiGroup.PATCH("/gemini/channels/:id/status", gemini.SetChannelStatus(cfgManager))
+		apiGroup.POST("/gemini/channels/:id/promotion", gemini.SetChannelPromotion(cfgManager))
+		apiGroup.PUT("/gemini/loadbalance", gemini.UpdateLoadBalance(cfgManager))
+		apiGroup.GET("/gemini/channels/metrics", handlers.GetGeminiChannelMetrics(geminiMetricsManager, cfgManager))
+		apiGroup.GET("/gemini/channels/metrics/history", handlers.GetGeminiChannelMetricsHistory(geminiMetricsManager, cfgManager))
+		apiGroup.GET("/gemini/channels/:id/keys/metrics/history", handlers.GetGeminiChannelKeyMetricsHistory(geminiMetricsManager, cfgManager))
+		apiGroup.GET("/gemini/global/stats/history", handlers.GetGlobalStatsHistory(geminiMetricsManager))
+		apiGroup.GET("/gemini/ping/:id", gemini.PingChannel(cfgManager))
+		apiGroup.GET("/gemini/ping", gemini.PingAllChannels(cfgManager))
 
 		// Fuzzy 模式设置
 		apiGroup.GET("/settings/fuzzy-mode", handlers.GetFuzzyMode(cfgManager))
